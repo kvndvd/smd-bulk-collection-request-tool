@@ -2,6 +2,7 @@
 *.ui
 *.log
 *.csv
+*.json
 /Court Request/
 /Counsel Request/
 /DOCUMENTATION/
