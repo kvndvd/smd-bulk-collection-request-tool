@@ -1,6 +1,5 @@
 *.xlsm
 *.ui
-*.ico
 /logs/
 /Court Request/
 /Counsel Request/
