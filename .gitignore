@@ -1,0 +1,16 @@
+*.xlsm
+*.ui
+*.ico
+/logs/
+/Court Request/
+/Counsel Request/
+/DOCUMENTATION/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.idea/
+.env
+dist/
+build/
+*.egg-info/
