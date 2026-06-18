@@ -30,6 +30,11 @@ from appLogger import setup_logger
 from emailBody import build_email_payload, send_email_via_outlook
 from networkDrop import copy_outputs_to_network
 from smdRequest import generate_outputs
+from emailTracker import (
+    build_email_fingerprint,
+    was_email_already_sent,
+    record_sent_email,
+)
 
 
 def get_app_dir() -> Path:
@@ -242,6 +247,14 @@ QMessageBox QPushButton {
     padding: 8px 14px;
     min-width: 80px;
 }
+QToolTip {
+    background-color: #2b2b2b;
+    color: white;
+    border: 1px solid #555;
+    padding: 6px;
+    border-radius: 4px;
+    font-size: 10pt;
+}
 """
 
 
@@ -268,36 +281,30 @@ class GenerateWorker(QObject):
 
     def run(self) -> None:
         try:
-            self.status.emit("Generating files...")
+            self.status.emit("Reading template")
             self.log.emit(f"Template: {self.template_path}")
             self.log.emit(f"Output folder: {self.output_dir}")
             self.log.emit(f"Create extra CT example file: {'Yes' if self.create_example_ct else 'No'}")
             self.log.emit(f"Auto-drop to network path: {'Yes' if self.network_drop else 'No'}")
             self.log.emit(f"Send completion email: {'Yes' if self.send_email else 'No'}")
 
+            self.status.emit("Creating templates")
             paths = generate_outputs(
                 self.template_path,
                 self.output_dir,
                 create_example_ct=self.create_example_ct,
             )
             self.log.emit("Local files created successfully.")
+            self.status.emit("Templates generated")
 
             if self.network_drop:
-                self.status.emit("Copying files to network path...")
+                self.status.emit("Dropping to network path")
                 self.log.emit("Copying files to network path...")
                 copy_outputs_to_network(paths)
                 self.log.emit("Network copy completed successfully.")
+                self.status.emit("Files dropped successfully")
 
-            if self.send_email:
-                self.status.emit("Preparing completion email...")
-                self.log.emit("Preparing completion email...")
-                payload = build_email_payload(paths)
-                send_email_via_outlook(payload, send_now=True)
-                self.log.emit(
-                    f"Completion email sent. Counsel count: {payload.counsel_count}, "
-                    f"Court count: {payload.court_count}"
-                )
-
+            self.status.emit("Process complete")
             self.finished.emit(paths)
 
         except Exception as exc:
@@ -318,7 +325,7 @@ class MainWindow(QMainWindow):
         self.worker: GenerateWorker | None = None
 
         self.setWindowTitle("SMD Bulk Collection Request Tool")
-        self.setFixedSize(500, 500)
+        self.setFixedSize(500, 350)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
@@ -357,11 +364,13 @@ class MainWindow(QMainWindow):
 
         self.close_btn = QPushButton("✕")
         self.close_btn.setObjectName("macCloseBtn")
+        self.close_btn.setToolTip("Close")
         self.close_btn.setFixedSize(20, 20)
         self.close_btn.clicked.connect(self.close)
 
         self.min_btn = QPushButton("—")
         self.min_btn.setObjectName("macMinBtn")
+        self.min_btn.setToolTip("Minimize")
         self.min_btn.setFixedSize(20, 20)
         self.min_btn.clicked.connect(self.showMinimized)
 
@@ -457,28 +466,29 @@ class MainWindow(QMainWindow):
         button_row.addWidget(self.generate_button)
         button_row.addWidget(self.view_folder_button)
 
-        log_shell = QFrame()
-        log_shell.setObjectName("logShell")
-        log_layout = QVBoxLayout(log_shell)
-        log_layout.setContentsMargins(12, 12, 12, 12)
-        log_layout.setSpacing(8)
+        # log_shell = QFrame()
+        # log_shell.setObjectName("logShell")
+        # log_layout = QVBoxLayout(log_shell)
+        # log_layout.setContentsMargins(12, 12, 12, 12)
+        # log_layout.setSpacing(8)
 
-        log_title = QLabel("Activity Log")
-        log_title.setObjectName("sectionTitle")
+        # log_title = QLabel("Activity Log")
+        # log_title.setObjectName("sectionTitle")
 
-        self.log_box = QPlainTextEdit()
-        self.log_box.setObjectName("logViewer")
-        self.log_box.setReadOnly(True)
-        self.log_box.setPlaceholderText("Status messages will appear here.")
+        # self.log_box = QPlainTextEdit()
+        # self.log_box.setObjectName("logViewer")
+        # self.log_box.setReadOnly(True)
+        # self.log_box.setPlaceholderText("Status messages will appear here.")
 
-        log_layout.addWidget(log_title)
-        log_layout.addWidget(self.log_box)
+        # log_layout.addWidget(log_title)
+        # log_layout.addWidget(self.log_box)
 
         layout.addWidget(self.header_bar)
-        layout.addWidget(status_frame)
+
         layout.addLayout(grid)
         layout.addLayout(button_row)
-        layout.addWidget(log_shell, 1)
+        layout.addWidget(status_frame)
+        # layout.addWidget(log_shell, 1)
 
         for widget in (
             self.header_bar,
@@ -536,8 +546,6 @@ class MainWindow(QMainWindow):
         self.status_text.setText(message)
 
     def log(self, message: str) -> None:
-        self.log_box.appendPlainText(message)
-        self.log_box.moveCursor(QTextCursor.End)
         self.logger.info(message)
 
     def select_template(self) -> None:
@@ -577,9 +585,8 @@ class MainWindow(QMainWindow):
             self._set_status("Template file not found")
             return
 
-        self.log_box.clear()
         self.set_controls_enabled(False)
-        self._set_status("Starting...")
+        self._set_status("Reading template")
 
         self.thread = QThread()
         self.worker = GenerateWorker(
@@ -608,7 +615,6 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
     def on_generate_finished(self, paths) -> None:
-        self.log("")
         self.log("Files created successfully:")
         self.log(f"- {paths.cnl_path}")
         self.log(f"- {paths.ct_path}")
@@ -620,16 +626,37 @@ class MainWindow(QMainWindow):
             self.log("- Files were also copied to the network path.")
 
         if self.send_email_checkbox.isChecked():
-            self.log("- Completion email was sent.")
+            payload = build_email_payload(paths)
+            fingerprint = build_email_fingerprint(payload, paths)
 
-        self._set_status("Completed successfully")
+            if was_email_already_sent(fingerprint):
+                reply = QMessageBox.question(
+                    self,
+                    "Email Already Sent",
+                    "A completion email appears to have already been sent for this run.\n\n"
+                    "Do you want to send it again?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply == QMessageBox.No:
+                    self.log("Email sending skipped because a matching completion email was already found.")
+                else:
+                    send_email_via_outlook(payload, send_now=True)
+                    record_sent_email(fingerprint)
+                    self.log("- Completion email was sent again by user choice.")
+            else:
+                send_email_via_outlook(payload, send_now=True)
+                record_sent_email(fingerprint)
+                self.log("- Completion email was sent.")
+
+        self._set_status("Click Generate when you're ready")
         self.set_controls_enabled(True)
         self.show_frameless_message("Success", "Done!", QMessageBox.Information)
 
     def on_generate_error(self, error_message: str) -> None:
         self.logger.exception("Generation failed")
         self.log(f"Error: {error_message}")
-        self._set_status("Generation failed")
+        self._set_status("Click Generate when you're ready")
         self.set_controls_enabled(True)
         self.show_frameless_message(
             "Generation Failed",
