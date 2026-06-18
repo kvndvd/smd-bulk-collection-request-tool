@@ -1,6 +1,7 @@
 *.xlsm
 *.ui
-/logs/
+*.log
+*.csv
 /Court Request/
 /Counsel Request/
 /DOCUMENTATION/
