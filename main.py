@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 import ctypes
+from datetime import datetime
 
 from PyQt5.QtCore import Qt, QEvent, QObject, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor, QIcon
@@ -23,19 +24,24 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
-    QApplication
 )
 
 from appLogger import setup_logger
 from emailBody import build_email_payload, send_email_via_outlook
 from networkDrop import copy_outputs_to_network
-from smdRequest import COUNSEL_FOLDER, COURT_FOLDER, generate_outputs
+from smdRequest import generate_outputs
 
 
 def get_app_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
+
+
+def create_run_output_dir() -> Path:
+    run_dir = get_app_dir() / datetime.now().strftime("%Y-%m-%d_%I%M%S%p")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 APP_STYLESHEET = """
@@ -264,9 +270,7 @@ class GenerateWorker(QObject):
         try:
             self.status.emit("Generating files...")
             self.log.emit(f"Template: {self.template_path}")
-            self.log.emit(f"Base output folder: {self.output_dir}")
-            self.log.emit(f"CNL CSV folder: {self.output_dir / COUNSEL_FOLDER}")
-            self.log.emit(f"CT CSV folder: {self.output_dir / COURT_FOLDER}")
+            self.log.emit(f"Output folder: {self.output_dir}")
             self.log.emit(f"Create extra CT example file: {'Yes' if self.create_example_ct else 'No'}")
             self.log.emit(f"Auto-drop to network path: {'Yes' if self.network_drop else 'No'}")
             self.log.emit(f"Send completion email: {'Yes' if self.send_email else 'No'}")
@@ -302,17 +306,19 @@ class GenerateWorker(QObject):
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
-        self.logger = setup_logger()
+        super().__init__()
+
+        self.run_output_dir = create_run_output_dir()
+        self.logger = setup_logger(log_dir=self.run_output_dir, reset=True)
         self.logger.info("MainWindow initialized")
 
-        super().__init__()
         self._drag_pos = None
         self._dragging = False
         self.thread: QThread | None = None
         self.worker: GenerateWorker | None = None
 
         self.setWindowTitle("SMD Bulk Collection Request Tool")
-        self.setFixedSize(450, 640)
+        self.setFixedSize(500, 500)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
 
@@ -408,69 +414,43 @@ class MainWindow(QMainWindow):
         grid.setVerticalSpacing(10)
         grid.setColumnStretch(0, 1)
 
-        template_label = QLabel("Template File")
-        template_label.setObjectName("sectionTitle")
-
         self.template_edit = QLineEdit()
         self.template_edit.setPlaceholderText("Select the SMD Appeals Template (.xlsx or .xlsm)")
 
         browse_button = QPushButton("Browse...")
+        browse_button.setToolTip("Select the SMD Appeals Template (.xlsx or .xlsm)")
         browse_button.setObjectName("autoBtn")
         browse_button.clicked.connect(self.select_template)
         browse_button.setMinimumHeight(42)
 
-        output_note_title = QLabel("Output Folders")
-        output_note_title.setObjectName("sectionTitle")
-
-        output_note = QLabel(
-            "Created automatically beside the selected template file:\n"
-            f"CNL-{COUNSEL_FOLDER}\n"
-            f"CT-{COURT_FOLDER}"
-        )
-        output_note.setObjectName("subtitle")
-        output_note.setWordWrap(True)
-
-        extra_note = QLabel("Creates a new CT request template")
-        extra_note.setObjectName("subtitle")
-        extra_note.setWordWrap(True)
-
-        self.extra_ct_checkbox = QCheckBox("Create new request template")
+        self.extra_ct_checkbox = QCheckBox("Creates new template")
         self.extra_ct_checkbox.setObjectName("extraCourtRequestCheck")
+        self.extra_ct_checkbox.setToolTip("Creates a new CT request template")
 
-        network_note = QLabel("Automatically copy generated files to the designated network path")
-        network_note.setObjectName("subtitle")
-        network_note.setWordWrap(True)
-
-        self.network_drop_checkbox = QCheckBox("Auto-drop to network path")
+        self.network_drop_checkbox = QCheckBox("Auto-Drop")
         self.network_drop_checkbox.setObjectName("networkDropCheck")
+        self.network_drop_checkbox.setToolTip("Automatically copy generated files to the designated network path")
 
-        email_note = QLabel("Send the completion email after all processing is done")
-        email_note.setObjectName("subtitle")
-        email_note.setWordWrap(True)
-
-        self.send_email_checkbox = QCheckBox("Send completion email (works only in Classic Outlook)")
+        self.send_email_checkbox = QCheckBox("Send Email (Outlook Classic Only)")
         self.send_email_checkbox.setObjectName("sendEmailCheck")
+        self.send_email_checkbox.setToolTip("Send the completion email after all processing is done")
 
         self.view_folder_button = QPushButton("View Folder")
         self.view_folder_button.setObjectName("autoBtn")
+        self.view_folder_button.setToolTip("Open output folder results")
         self.view_folder_button.clicked.connect(self.view_output_folder)
         self.view_folder_button.setMinimumHeight(42)
 
         self.generate_button = QPushButton("Generate Files")
         self.generate_button.setObjectName("autoBtn")
+        self.generate_button.setToolTip("Generate Counsel & Court Request Templates")
         self.generate_button.clicked.connect(self.generate_files)
         self.generate_button.setMinimumHeight(42)
 
-        grid.addWidget(template_label, 0, 0, 1, 2)
         grid.addWidget(self.template_edit, 1, 0)
         grid.addWidget(browse_button, 1, 1)
-        grid.addWidget(output_note_title, 2, 0, 1, 2)
-        grid.addWidget(output_note, 3, 0, 1, 2)
-        grid.addWidget(extra_note, 4, 0, 1, 2)
         grid.addWidget(self.extra_ct_checkbox, 5, 0, 1, 2)
-        grid.addWidget(network_note, 6, 0, 1, 2)
         grid.addWidget(self.network_drop_checkbox, 7, 0, 1, 2)
-        grid.addWidget(email_note, 8, 0, 1, 2)
         grid.addWidget(self.send_email_checkbox, 9, 0, 1, 2)
 
         button_row = QHBoxLayout()
@@ -519,7 +499,7 @@ class MainWindow(QMainWindow):
         self.template_edit.setEnabled(enabled)
 
     def view_output_folder(self) -> None:
-        output_dir = get_app_dir()
+        output_dir = self.run_output_dir
 
         if not output_dir.exists():
             self.show_frameless_message(
@@ -585,7 +565,7 @@ class MainWindow(QMainWindow):
             return
 
         template_path = Path(template_text).expanduser().resolve()
-        output_dir = get_app_dir()
+        output_dir = self.run_output_dir
 
         if not template_path.exists():
             self.logger.error("Template file not found: %s", template_path)
@@ -702,7 +682,7 @@ def run_cli(args: list[str]) -> int:
         return 1
 
     template_path = Path(args[1]).expanduser().resolve()
-    output_dir = get_app_dir()
+    output_dir = create_run_output_dir()
 
     create_example = "--with-example" in args[2:]
     network_drop = "--network-drop" in args[2:]
@@ -713,6 +693,10 @@ def run_cli(args: list[str]) -> int:
         return 1
 
     try:
+        logger = setup_logger(log_dir=output_dir, reset=True)
+        logger.info("CLI run started")
+        logger.info("Template: %s", template_path)
+
         paths = generate_outputs(
             template_path,
             output_dir,
@@ -738,11 +722,6 @@ def run_cli(args: list[str]) -> int:
         print("Completion email sent.")
     return 0
 
-def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
-
 
 def run_gui() -> int:
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
@@ -753,7 +732,6 @@ def run_gui() -> int:
 
     icon_path = get_app_dir() / "icon.ico"
     app_icon = QIcon(str(icon_path))
-
     app.setWindowIcon(app_icon)
 
     window = MainWindow()
@@ -761,6 +739,7 @@ def run_gui() -> int:
     window.show()
 
     return app.exec_()
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:

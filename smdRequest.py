@@ -21,14 +21,12 @@ FIRST_DUP_FILL = PatternFill(fill_type="solid", fgColor="C6EFCE")
 SECOND_DUP_FILL = PatternFill(fill_type="solid", fgColor="FCE4D6")
 FILTERED_ROW_FONT = Font(color="FF0000")
 
-COUNSEL_FOLDER = "Counsel Request"
-COURT_FOLDER = "Court Request"
+NEW_TEMPLATE_FOLDER = "New Template"
 
 DEFAULT_USER_TYPE = "SMD"
 DEFAULT_HOST_SYSTEM = "FED_APP"
 DEFAULT_CASE_TYPE = ""
 
-# Add more phrases here any time in the future.
 EXCLUDED_ENTRYTEXT_PHRASES = [
     "motion to extend the time",
     "motion for extension of time",
@@ -99,8 +97,8 @@ def parse_excel_date(value) -> date | None:
         "%m/%d/%Y",
         "%m/%d/%y",
         "%Y-%m-%d",
-        "%m/%d/%Y %H:%M",
-        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %I%M%",
+        "%m/%d/%Y %I%M%S%p",
     ]
 
     for fmt in formats:
@@ -277,13 +275,10 @@ def generate_outputs(
     file_date = format_filename_date(base_date)
     example_file_date = format_example_filename_date(base_date)
 
-    counsel_dir = output_dir / COUNSEL_FOLDER
-    court_dir = output_dir / COURT_FOLDER
-    counsel_dir.mkdir(parents=True, exist_ok=True)
-    court_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    cnl_path = counsel_dir / f"smd_SMD_{file_date}_CNL_Request.csv"
-    ct_path = court_dir / f"smd_SMD_{file_date}_CT_Request.csv"
+    cnl_path = output_dir / f"smd_SMD_{file_date}_CNL_Request.csv"
+    ct_path = output_dir / f"smd_SMD_{file_date}_CT_Request.csv"
     xlsm_path = output_dir / format_xlsm_filename(base_date)
     ct_example_path: Path | None = None
 
@@ -298,7 +293,9 @@ def generate_outputs(
     )
 
     if create_example_ct:
-        ct_example_path = court_dir / f"smd_SMD_{example_file_date}_CT_Request_1.csv"
+        new_template_dir = output_dir / NEW_TEMPLATE_FOLDER
+        new_template_dir.mkdir(parents=True, exist_ok=True)
+        ct_example_path = new_template_dir / f"smd_SMD_{example_file_date}_CT_Request.csv"
         write_csv(
             ct_example_path,
             [
